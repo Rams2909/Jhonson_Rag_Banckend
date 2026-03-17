@@ -57,7 +57,8 @@ def _run_pipeline(query: str, top_k: int, loop: asyncio.AbstractEventLoop, queue
     def emit(event: str, data):
         asyncio.run_coroutine_threadsafe(queue.put({"event": event, "data": data}), loop)
 
-    asyncio.set_event_loop(asyncio.new_event_loop())
+    thread_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(thread_loop)
     tracker = LatencyTracker()
 
     try:
@@ -118,7 +119,7 @@ def _run_pipeline(query: str, top_k: int, loop: asyncio.AbstractEventLoop, queue
                 role="Answer Generator",
                 goal="Generate a precise answer using only the provided context.",
                 backstory="Grounded assistant that only uses retrieved evidence to answer.",
-                llm=llm, tools=[], verbose=True, allow_delegation=False,
+                llm=_llm(), tools=[], verbose=True, allow_delegation=False,
             )
             answer_task = Task(
                 description=(
@@ -140,6 +141,7 @@ def _run_pipeline(query: str, top_k: int, loop: asyncio.AbstractEventLoop, queue
         raise
     finally:
         asyncio.run_coroutine_threadsafe(queue.put(_SENTINEL), loop)
+        thread_loop.close()
 
 
 async def run_query_crew(query: str, top_k: int = 10) -> AsyncIterator[dict]:
@@ -150,7 +152,7 @@ async def run_query_crew(query: str, top_k: int = 10) -> AsyncIterator[dict]:
       {"event": "latency",  "data": {...}}
       {"event": "done",     "data": ""}
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
 
     future = loop.run_in_executor(_executor, _run_pipeline, query, top_k, loop, queue)
